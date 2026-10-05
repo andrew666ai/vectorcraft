@@ -1,10 +1,10 @@
 //! VectorCraft desktop app.
 //!
-//! Usage: `vectorcraft [--control <port>] [files…]`
+//! Usage: `vectorcraft [--control <port>] [--control-token <64-hex> | --control-token-file <path>] [files…]`
 //!
-//! `--control <port>` (or `VECTORCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server:
-//! `{"id":1,"method":"ui.inspect","params":{}}` → `{"id":1,"ok":true,"result":…}`.
-//! See `vectorcraft_ui_egui::control` for the methods.
+//! `--control <port>` (or `VECTORCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server.
+//! The first line must authenticate; later lines are methods. The token is not printed.
+//! See `vectorcraft_ui_egui::control` for the methods and `SECURITY.md` for the lock.
 
 mod clipboard;
 mod control_server;
@@ -171,7 +171,9 @@ fn services() -> Services {
         system_clipboard: Some(clipboard::system_clipboard()),
         // Help → Discord / website / GitHub, the Discord button, About and Home links.
         open_url: Some(Box::new(|url: &str| {
-            let _ = webbrowser::open(url);
+            if vectorcraft_ui_egui::browser_url_allowed(url) {
+                let _ = webbrowser::open(url);
+            }
         })),
         reveal: Some(Box::new(reveal)),
         // Links panel: Edit Original; Package: Show Package. Relink to Folder and Package pick folders.
@@ -218,11 +220,15 @@ const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
 
 fn main() -> eframe::Result {
     let mut control_port: Option<u16> = std::env::var("VECTORCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
+    let mut control_token = None;
+    let mut control_token_file = None;
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
+            "--control-token" => control_token = args.next(),
+            "--control-token-file" => control_token_file = args.next().map(std::path::PathBuf::from),
             "--version" => {
                 println!("vectorcraft {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -230,6 +236,22 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
+    let control = match control_port {
+        Some(port) => match vectorcraft_mcp::control_auth::resolve_server_token(control_token, control_token_file) {
+            Ok((token, file)) => {
+                match &file {
+                    Some(path) => eprintln!("vectorcraft: control token file: {}", path.display()),
+                    None => eprintln!("vectorcraft: using supplied control token"),
+                }
+                Some((port, token))
+            }
+            Err(e) => {
+                eprintln!("vectorcraft: control server not started: {e}");
+                None
+            }
+        },
+        None => None,
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("VectorCraft")
@@ -263,8 +285,8 @@ fn main() -> eframe::Result {
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = CUSTOM_TITLEBAR;
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
+            if let Some((port, token)) = control {
+                let rx = control_server::start(port, token, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
             for f in files {

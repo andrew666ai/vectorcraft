@@ -5,6 +5,7 @@ use std::io::{BufRead, Write};
 use serde_json::{Value, json};
 
 use crate::backend::Backend;
+use crate::control_auth::{LineRead, MAX_BATCH_STEPS, MAX_REQUEST_BYTES, read_bounded_line};
 use crate::tools::{call_tool, tool_definitions};
 
 /// The MCP revision we implement.
@@ -58,16 +59,27 @@ impl Server {
 
     /// Serve newline-delimited JSON-RPC until `input` closes. Logs go to stderr only (stdout is
     /// the protocol stream).
-    pub fn serve(&mut self, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        for line in input.lines() {
-            let line = line?;
-            if let Some(reply) = self.handle_line(&line) {
-                output.write_all(reply.as_bytes())?;
-                output.write_all(b"\n")?;
-                output.flush()?;
+    pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+        let mut line = String::new();
+        loop {
+            match read_bounded_line(&mut input, &mut line, MAX_REQUEST_BYTES)? {
+                LineRead::Eof => return Ok(()),
+                LineRead::TooLong => {
+                    let reply = error(Value::Null, INVALID_REQUEST, format!("request exceeds {MAX_REQUEST_BYTES} bytes"));
+                    output.write_all(reply.to_string().as_bytes())?;
+                    output.write_all(b"\n")?;
+                    output.flush()?;
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request exceeds budget"));
+                }
+                LineRead::Line => {
+                    if let Some(reply) = self.handle_line(&line) {
+                        output.write_all(reply.as_bytes())?;
+                        output.write_all(b"\n")?;
+                        output.flush()?;
+                    }
+                }
             }
         }
-        Ok(())
     }
 
     /// Handle one line; returns the reply line (None for notifications and blank lines).
@@ -81,6 +93,8 @@ impl Server {
                 // Batches were removed in 2025-06-18; still answer older clients sensibly.
                 if batch.is_empty() {
                     Some(error(Value::Null, INVALID_REQUEST, "empty batch"))
+                } else if batch.len() > MAX_BATCH_STEPS {
+                    Some(error(Value::Null, INVALID_REQUEST, format!("batch exceeds {MAX_BATCH_STEPS} steps")))
                 } else {
                     let replies: Vec<Value> = batch.into_iter().filter_map(|m| self.handle(m)).collect();
                     (!replies.is_empty()).then_some(Value::Array(replies))

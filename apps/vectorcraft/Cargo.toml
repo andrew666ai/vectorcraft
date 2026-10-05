@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 vectorcraft-engine = { workspace = true }
+vectorcraft-mcp = { workspace = true }
 vectorcraft-ui-egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 egui = { workspace = true }

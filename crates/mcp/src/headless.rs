@@ -265,9 +265,9 @@ impl Backend for Headless {
             "app.save" => self.save(p),
             "app.export" => self.export(p),
             "app.quit" => Ok(Value::Null),
-            m if m.starts_with("ui.") => {
-                Err(format!("`{m}` needs the desktop app (start `vectorcraft --control 7979` and use `vectorcraft-cli mcp --connect`)"))
-            }
+            m if m.starts_with("ui.") => Err(format!(
+                "`{m}` needs the desktop app (start `vectorcraft --control 7979` and use `vectorcraft-cli mcp --connect` with the control token)"
+            )),
             other => Err(format!("unknown method `{other}`")),
         }
     }

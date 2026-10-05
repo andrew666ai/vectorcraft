@@ -4186,6 +4186,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "vectorcraft-engine",
+ "vectorcraft-mcp",
  "vectorcraft-ui-egui",
  "webbrowser",
  "winresource",
@@ -4351,6 +4352,7 @@ dependencies = [
 name = "vectorcraft-mcp"
 version = "0.2.0"
 dependencies = [
+ "getrandom 0.3.4",
  "image",
  "log",
  "proptest",

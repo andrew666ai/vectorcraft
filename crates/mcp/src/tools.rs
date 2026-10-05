@@ -408,7 +408,7 @@ fn need_ui(b: &dyn Backend, tool: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "`{tool}` needs the desktop app: run `vectorcraft --control 7979` and start the server with `vectorcraft-cli mcp --connect 127.0.0.1:7979`"
+            "`{tool}` needs the desktop app: run `vectorcraft --control 7979` (it writes a control-token file) and start the server with `vectorcraft-cli mcp --connect 127.0.0.1:7979`"
         ))
     }
 }

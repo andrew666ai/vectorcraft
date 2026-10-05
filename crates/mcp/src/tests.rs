@@ -86,6 +86,15 @@ fn serve_loop_writes_one_line_per_request() {
 }
 
 #[test]
+fn batch_over_the_step_limit_is_rejected() {
+    let mut s = server();
+    let batch: Vec<Value> = (0..257).map(|_| json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).collect();
+    let reply = s.handle_line(&serde_json::to_string(&Value::Array(batch)).unwrap()).unwrap();
+    let v: Value = serde_json::from_str(&reply).unwrap();
+    assert!(v["error"]["message"].as_str().unwrap().contains("256"), "{v}");
+}
+
+#[test]
 fn initialize_negotiates_version() {
     let mut s = server();
     let v = rpc(&mut s, 1, "initialize", json!({"protocolVersion": "2025-03-26"}));
@@ -330,6 +339,8 @@ fn errors_are_tool_results_not_crashes() {
 // ---------- remote ----------
 
 /// A fake control server: answers `document.inspect`, echoes `engine.execute`, errors otherwise.
+const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn fake_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -337,8 +348,20 @@ fn fake_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
         let (stream, _) = listener.accept().unwrap();
         let mut out = stream.try_clone().unwrap();
         let mut seen = vec![];
+        let mut authed = false;
         for line in BufReader::new(stream).lines() {
             let msg: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if !authed {
+                let ok = msg["method"] == "auth" && msg["params"]["token"] == TOKEN;
+                if ok {
+                    writeln!(out, "{}", json!({"id": msg["id"], "ok": true, "result": {"authenticated": true}})).unwrap();
+                    authed = true;
+                } else {
+                    writeln!(out, "{}", json!({"id": msg["id"], "ok": false, "error": "authentication required"})).unwrap();
+                    break;
+                }
+                continue;
+            }
             let reply = match msg["method"].as_str().unwrap() {
                 "document.inspect" => json!({"ok": true, "result": {"title": "Remote", "layers": []}}),
                 "engine.execute" => json!({"ok": true, "result": {"echo": msg["params"]}}),
@@ -358,7 +381,7 @@ fn fake_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
 #[test]
 fn remote_forwards_methods() {
     let (addr, h) = fake_app();
-    let mut s = Server::new(Box::new(Remote::connect(&addr).unwrap()));
+    let mut s = Server::new(Box::new(Remote::connect(&addr, TOKEN).unwrap()));
     let r = call(&mut s, 1, "inspect_document", json!({}));
     assert!(text_of(&r).contains("Remote"));
     let r = call(&mut s, 2, "run_command", json!({"command": "object.group"}));
@@ -383,11 +406,37 @@ fn remote_connect_fails_fast() {
     held.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
     let port = held.local_addr().unwrap().as_socket().unwrap().port();
     let start = std::time::Instant::now();
-    assert!(Remote::connect(&format!("127.0.0.1:{port}")).is_err());
+    assert!(Remote::connect(&format!("127.0.0.1:{port}"), TOKEN).is_err());
     assert!(start.elapsed() < std::time::Duration::from_secs(5), "took {:?}", start.elapsed());
     // Nothing else could listen there meanwhile.
     assert!(std::net::TcpListener::bind(format!("127.0.0.1:{port}")).is_err());
     drop(held);
+}
+
+#[test]
+fn remote_refuses_a_bad_token_and_a_non_loopback_address() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let h = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut out = stream.try_clone().unwrap();
+        let mut methods = vec![];
+        let mut lines = BufReader::new(stream).lines();
+        if let Some(line) = lines.next() {
+            let msg: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            methods.push(msg["method"].as_str().unwrap().to_string());
+            writeln!(out, "{}", json!({"id": msg["id"], "ok": false, "error": "authentication required"})).unwrap();
+        }
+        methods
+    });
+    let err = Remote::connect(&addr, TOKEN).unwrap_err();
+    assert!(err.to_string().contains("authentication required"));
+    assert_eq!(h.join().unwrap(), ["auth"]);
+
+    let err = Remote::connect("203.0.113.5:9", TOKEN).unwrap_err();
+    assert!(err.to_string().contains("loopback"), "{err}");
+    let err = Remote::connect("127.0.0.1:9", "nope").unwrap_err();
+    assert!(err.to_string().contains("64"), "{err}");
 }
 
 #[test]

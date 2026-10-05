@@ -1,7 +1,7 @@
 //! `vectorcraft-cli`: VectorCraft from the command line.
 //!
 //! ```text
-//! vectorcraft-cli mcp [--connect 127.0.0.1:7979 | --headless]
+//! vectorcraft-cli mcp [--connect 127.0.0.1:7979 | --headless] [--control-token TOKEN | --control-token-file PATH]
 //! vectorcraft-cli run [--in FILE] [--cmd id [--params '{json}']]... [--export out.svg|.png|.pdf|.jpg|.webp|.vectorcraft]... [--scale 2]
 //! vectorcraft-cli commands
 //! vectorcraft-cli convert IN OUT [--scale 2] [--artboard 0 | --range 1-3,5] [--outline-text]
@@ -23,9 +23,10 @@ const USAGE: &str = "\
 vectorcraft-cli — VectorCraft automation
 
 USAGE:
-  vectorcraft-cli mcp [--connect ADDR | --headless]
+  vectorcraft-cli mcp [--connect ADDR | --headless] [--control-token TOKEN | --control-token-file PATH]
       Run the MCP server on stdio. Default: connect to a running app at 127.0.0.1:7979
-      (vectorcraft --control 7979), falling back to a headless in-process session.
+      (vectorcraft --control 7979) using the bearer token, falling back to a headless session.
+      --connect refuses non-loopback addresses. Headless and a failed connect do not need a token.
 
   vectorcraft-cli run [--in FILE] [--cmd ID [--params JSON]]... [--export FILE]... [--scale N]
       Headless batch: open FILE (any readable format) or start a new document, run commands in
@@ -89,32 +90,49 @@ fn main() -> ExitCode {
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut connect: Option<String> = None;
     let mut headless = false;
+    let mut control_token = None;
+    let mut control_token_file = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--connect" => connect = Some(it.next().cloned().ok_or("--connect needs an address")?),
             "--headless" => headless = true,
+            "--control-token" => control_token = Some(it.next().cloned().ok_or("--control-token needs a 64-character hex token")?),
+            "--control-token-file" => {
+                control_token_file = Some(std::path::PathBuf::from(it.next().ok_or("--control-token-file needs a path")?));
+            }
             other => return Err(format!("unknown mcp option `{other}`")),
         }
     }
     if headless && connect.is_some() {
         return Err("use either --connect or --headless".into());
     }
+    if headless && (control_token.is_some() || control_token_file.is_some()) {
+        return Err("headless MCP does not use the control token".into());
+    }
     let backend: Box<dyn Backend> = if headless {
         Box::new(Headless::with_document())
     } else if let Some(addr) = connect {
-        // Explicit address: fail loudly if the app isn't there.
-        Box::new(Remote::connect(&addr).map_err(|e| format!("cannot connect to {addr}: {e}"))?)
+        // Explicit address: fail loudly if the app isn't there or the token is refused.
+        Box::new(connect_app(&addr, control_token, control_token_file)?)
     } else {
-        match Remote::connect(DEFAULT_ADDR) {
+        match connect_app(DEFAULT_ADDR, control_token, control_token_file) {
             Ok(r) => Box::new(r),
-            Err(_) => Box::new(Headless::with_document()),
+            Err(e) => {
+                eprintln!("vectorcraft-cli: {e}; using a headless session");
+                Box::new(Headless::with_document())
+            }
         }
     };
     eprintln!("vectorcraft-cli: MCP server on stdio ({})", backend.describe());
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     Server::new(backend).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+}
+
+fn connect_app(addr: &str, token: Option<String>, token_file: Option<std::path::PathBuf>) -> Result<Remote, String> {
+    let token = vectorcraft_mcp::control_auth::resolve_client_token(token, token_file)?;
+    Remote::connect(addr, &token).map_err(|e| format!("cannot connect to {addr}: {e}"))
 }
 
 fn commands() -> Result<(), String> {
