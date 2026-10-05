@@ -1,7 +1,12 @@
 # Control protocol
 
-`vectorcraft --control <port>` listens on `127.0.0.1:<port>` (loopback only). One JSON request per line:
-`{"id": 1, "method": "ui.inspect", "params": {}}` → `{"id": 1, "ok": true, "result": {...}}` or `{"id":1,"ok":false,"error":"..."}`.
+`vectorcraft --control <port>` listens on `127.0.0.1:<port>` (loopback only). The first line on a connection must authenticate:
+
+`{"id": 1, "method": "auth", "params": {"token": "<64 hex characters>"}}` → `{"id": 1, "ok": true, "result": {"authenticated": true}}`.
+
+Any other first request, or a wrong token, returns `authentication required` and the connection closes. No method runs until auth succeeds. The token comes from `--control-token`, `--control-token-file`, `VECTORCRAFT_CONTROL_TOKEN`, `VECTORCRAFT_CONTROL_TOKEN_FILE`, or the private `control-token` file next to UI preferences (created on first use; the app prints the path, not the token). See [SECURITY.md](../SECURITY.md).
+
+After that, one JSON request per line: `{"id": 1, "method": "ui.inspect", "params": {}}` → `{"id": 1, "ok": true, "result": {...}}` or `{"id":1,"ok":false,"error":"..."}`. Limits: 16 connections, 1 MiB per request line, 8 MiB per reply. Do not tunnel this port.
 
 | Method | Params | |
 |---|---|---|

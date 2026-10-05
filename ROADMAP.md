@@ -86,8 +86,8 @@ grade by behaviour against `plan/illustrator/`, not by whether a menu item exist
 - **Architecture:** 19+ crates with enforced layering (`cargo xtask layers`). Every action is a command (~400 engine + ~50 UI). Undo is unlimited via structural sharing. `command.batch` runs several commands as one transaction.
 - **Automation:**
   - Actions panel (record/playback, persisted), generic parameter dialogs for every "…" command.
-  - JSON-lines control channel with real egui pointer and keyboard injection.
-  - MCP server with 25 tools (drawing, text, effects, Pathfinder, transforms, graphs, text wrap, export, screenshots, any command), attached to the running app or headless.
+  - JSON-lines control channel with real egui pointer and keyboard injection. Loopback only, and the first line must present a 256-bit bearer token (`SECURITY.md`).
+  - MCP server with 25 tools (drawing, text, effects, Pathfinder, transforms, graphs, text wrap, export, screenshots, any command), on stdio against a headless session or, with the same token, the running app.
   - Headless CLI (`vectorcraft-cli run`, `convert`, `info`, `bench`, `perf`, `mcp`).
   - Actions panel that records and plays back commands.
 - **UI:** Illustrator 2026 layout restyled to measured values:

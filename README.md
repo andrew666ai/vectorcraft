@@ -145,7 +145,7 @@ exposes to agents, and exported by VectorCraft's own renderer. The source files 
 ```sh
 cargo run --release -p vectorcraft                          # desktop app
 cargo run --release -p vectorcraft -- examples/dusk-poster.vectorcraft
-cargo run --release -p vectorcraft -- --control 7979        # + JSON control channel
+cargo run --release -p vectorcraft -- --control 7979        # loopback control; bearer token, see SECURITY.md
 cargo run --release -p vectorcraft-cli -- mcp               # MCP server (stdio)
 cargo run --release -p vectorcraft-cli -- run --in examples/ribbons.vectorcraft --export out.pdf   # headless batch
 cargo run --release -p vectorcraft-cli -- bench examples/neon-drive.vectorcraft                   # render timing

@@ -8,11 +8,15 @@ It has two backends:
 
 | Mode | How | What works |
 |---|---|---|
-| **Remote** | `vectorcraft-cli mcp --connect 127.0.0.1:7979` (the app must run with `vectorcraft --control 7979`) | Everything. Tool calls are forwarded over the [control protocol](control-protocol.md), so you watch the app change live. |
+| **Remote** | `vectorcraft-cli mcp --connect 127.0.0.1:7979` (the app must run with `vectorcraft --control 7979`) | Everything. Tool calls are forwarded over the [control protocol](control-protocol.md), so you watch the app change live. The bridge sends the control bearer token and refuses a non-loopback address. |
 | **Headless** | `vectorcraft-cli mcp --headless` | An in-process engine session with a CPU renderer. Everything except the UI-only tools (`inspect_ui`, `type_text`, `open_panel`, `screenshot {window:true}`). |
 
 With no flag, the server tries `127.0.0.1:7979` and falls back to headless. Logs go to stderr; stdout carries
 only protocol messages.
+
+Prefer stdio. Headless MCP does not open a TCP port and does not need a token. `--connect` uses the token from
+`--control-token`, `--control-token-file`, `VECTORCRAFT_CONTROL_TOKEN`, `VECTORCRAFT_CONTROL_TOKEN_FILE`, or the
+`control-token` file the desktop app creates next to its preferences. The token is not printed. See [SECURITY.md](../SECURITY.md).
 
 ## Build and register
 
@@ -30,7 +34,7 @@ Other clients use the same command in their JSON config:
 {"mcpServers": {"vectorcraft": {"command": "/abs/path/target/release/vectorcraft-cli", "args": ["mcp"]}}}
 ```
 
-For a live session, start the app first: `cargo run --release -p vectorcraft -- --control 7979`.
+For a live session, start the app first: `cargo run --release -p vectorcraft -- --control 7979`. It prints the path of `control-token`; `vectorcraft-cli mcp --connect 127.0.0.1:7979` reads that file.
 
 ## Tools
 

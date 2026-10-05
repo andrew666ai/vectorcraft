@@ -413,7 +413,12 @@ impl VectorcraftApp {
     }
 
     /// Open a link in the browser (Help → Discord, website, GitHub…).
+    /// Only `https` URLs and local `file` URLs are opened.
     pub fn open_url(&mut self, url: &str) {
+        if !browser_url_allowed(url) {
+            self.ui.status = "only https and file URLs can be opened".into();
+            return;
+        }
         match self.services.open_url.as_mut() {
             Some(open) => open(url),
             None => self.pending_url = Some(url.to_string()),
@@ -538,6 +543,31 @@ impl VectorcraftApp {
     }
 }
 
+/// `https` links, and `file` URLs with no remote host (files this app just wrote).
+pub fn browser_url_allowed(url: &str) -> bool {
+    if url.len() > 4096 || url != url.trim() || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    let Some((scheme, rest)) = url.split_once(':') else { return false };
+    if scheme.len() > 16 || !scheme.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return false;
+    }
+    if scheme.eq_ignore_ascii_case("https") {
+        let Some(body) = rest.strip_prefix("//") else { return false };
+        return !body.is_empty() && !body.starts_with('/') && !body.contains('\\');
+    }
+    if scheme.eq_ignore_ascii_case("file") {
+        let Some(body) = rest.strip_prefix("//") else { return false };
+        if let Some(path) = body.strip_prefix('/') {
+            return !path.is_empty();
+        }
+        let host = body.split('/').next().unwrap_or("");
+        let local = host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1";
+        return local && body.contains('/');
+    }
+    false
+}
+
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -615,7 +645,9 @@ impl VectorcraftApp {
         }
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
-        if let Some(u) = self.pending_url.take() {
+        if let Some(u) = self.pending_url.take()
+            && browser_url_allowed(&u)
+        {
             ctx.open_url(egui::OpenUrl::new_tab(u));
         }
         if let Some(t) = self.clipboard_out.take() {

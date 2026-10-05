@@ -165,6 +165,9 @@ pub(crate) fn open_url(app: &mut VectorcraftApp, p: &Value) -> Result<Value, Str
         Some(u) => u.to_string(),
         None => app.session.attributes_info().url.filter(|u| !u.is_empty()).ok_or("the selection has no URL (or they differ)")?,
     };
+    if !crate::browser_url_allowed(&url) {
+        return Err("only https and file URLs can be opened".into());
+    }
     app.open_url(&url);
     Ok(json!({ "url": url }))
 }
@@ -222,5 +225,17 @@ mod tests {
         let texts = frame(&mut app);
         assert!(!texts.iter().any(|t| t == "https://example.com/a" || t == "first note"), "{texts:?}");
         assert!(open_url(&mut app, &json!({})).is_err());
+    }
+
+    #[test]
+    fn open_url_allows_https_and_local_files_only() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        assert_eq!(open_url(&mut app, &json!({"url": "https://example.com/a"})).unwrap()["url"], "https://example.com/a");
+        assert_eq!(open_url(&mut app, &json!({"url": "file:///tmp/out.pdf"})).unwrap()["url"], "file:///tmp/out.pdf");
+        assert!(open_url(&mut app, &json!({"url": "http://example.com/a"})).is_err());
+        assert!(open_url(&mut app, &json!({"url": "javascript:alert(1)"})).is_err());
+        assert!(open_url(&mut app, &json!({"url": "file://evil.example/tmp/a"})).is_err());
+        assert!(!crate::browser_url_allowed("data:text/html,hi"));
+        assert!(!crate::browser_url_allowed("https://example.com/a b"));
     }
 }

@@ -86,6 +86,8 @@ fn export_tool_lists_engine_formats_and_options() {
     assert!(open["description"].as_str().unwrap().contains(".ait"));
 }
 
+const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 /// A fake app that records `engine.execute` calls and answers each with an empty object.
 fn recording_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -94,8 +96,16 @@ fn recording_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
         let (stream, _) = listener.accept().unwrap();
         let mut out = stream.try_clone().unwrap();
         let mut seen = vec![];
+        let mut authed = false;
         for line in BufReader::new(stream).lines() {
             let msg: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if !authed {
+                assert_eq!(msg["method"], "auth");
+                assert_eq!(msg["params"]["token"], TOKEN);
+                writeln!(out, "{}", json!({"id": msg["id"], "ok": true, "result": {"authenticated": true}})).unwrap();
+                authed = true;
+                continue;
+            }
             writeln!(out, "{}", json!({"id": msg["id"], "ok": true, "result": {}})).unwrap();
             seen.push(msg);
         }
@@ -108,7 +118,7 @@ fn recording_app() -> (String, std::thread::JoinHandle<Vec<Value>>) {
 fn export_is_the_same_call_in_the_app_and_headless() {
     let args = json!({"format": "png", "artboard": 1, "options": {"scale": 2, "artboard": 0, "range": "1-2"}});
     let (addr, app) = recording_app();
-    let mut remote = Remote::connect(&addr).unwrap();
+    let mut remote = Remote::connect(&addr, TOKEN).unwrap();
     assert!(!call_tool(&mut remote, "export", &args).is_error);
     drop(remote);
     let seen = app.join().unwrap();
